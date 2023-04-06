@@ -13,7 +13,7 @@ RUN make yarn
 COPY ./ui/ ./ui/
 RUN make build-ui
 
-FROM golang:1.20.0-buster@sha256:f8fbd744a9129e3b705362d39c17f0cbdafd1979a08508ba2d72e488fdf98e22 as build
+FROM golang:1.20.2-buster@sha256:97c3e1d5d0b59e92e9e067c1e4192d452566b60512203bf885f568e8e364155a as build
 WORKDIR /go/src/github.com/pomerium/pomerium
 
 RUN apt-get update \
@@ -30,7 +30,7 @@ RUN make build-debug NAME=pomerium
 RUN touch /config.yaml
 RUN go install github.com/go-delve/delve/cmd/dlv@latest
 
-FROM debian:latest@sha256:7b16406f7f0918371637674373850eb53737505b1ecbc723ce992dd19701cffb
+FROM debian:latest@sha256:d4bbca2152d6376b59f3dd85a73e6fa041693f8a5f2919c47d4f718fc1a2878f
 ENV AUTOCERT_DIR /data/autocert
 WORKDIR /pomerium
 COPY --from=build /go/src/github.com/pomerium/pomerium/bin/* /bin/

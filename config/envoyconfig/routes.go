@@ -60,7 +60,7 @@ func (b *Builder) buildPomeriumHTTPRoutes(options *config.Options, host string) 
 		routes = append(routes,
 			// enable ext_authz
 			b.buildControlPlanePathRoute("/.pomerium/jwt", true),
-			b.buildControlPlanePathRoute("/.pomerium/webauthn", true),
+			b.buildControlPlanePathRoute(urlutil.WebAuthnURLPath, true),
 			// disable ext_authz and passthrough to proxy handlers
 			b.buildControlPlanePathRoute("/ping", false),
 			b.buildControlPlanePathRoute("/healthz", false),
@@ -74,18 +74,36 @@ func (b *Builder) buildPomeriumHTTPRoutes(options *config.Options, host string) 
 			routes = append(routes, b.buildControlPlanePathRoute("/robots.txt", false))
 		}
 	}
-	// if we're handling authentication, add the oauth2 callback url
-	authenticateURL, err := options.GetInternalAuthenticateURL()
+
+	authRoutes, err := b.buildPomeriumAuthenticateHTTPRoutes(options, host)
 	if err != nil {
 		return nil, err
 	}
-	if config.IsAuthenticate(options.Services) && urlMatchesHost(authenticateURL, host) {
-		routes = append(routes,
-			b.buildControlPlanePathRoute(options.AuthenticateCallbackPath, false),
-			b.buildControlPlanePathRoute("/", false),
-		)
-	}
+	routes = append(routes, authRoutes...)
 	return routes, nil
+}
+
+func (b *Builder) buildPomeriumAuthenticateHTTPRoutes(options *config.Options, host string) ([]*envoy_config_route_v3.Route, error) {
+	if !config.IsAuthenticate(options.Services) {
+		return nil, nil
+	}
+
+	for _, fn := range []func() (*url.URL, error){
+		options.GetAuthenticateURL,
+		options.GetInternalAuthenticateURL,
+	} {
+		u, err := fn()
+		if err != nil {
+			return nil, err
+		}
+		if urlMatchesHost(u, host) {
+			return []*envoy_config_route_v3.Route{
+				b.buildControlPlanePathRoute(options.AuthenticateCallbackPath, false),
+				b.buildControlPlanePathRoute("/", false),
+			}, nil
+		}
+	}
+	return nil, nil
 }
 
 func (b *Builder) buildControlPlanePathRoute(path string, protected bool) *envoy_config_route_v3.Route {

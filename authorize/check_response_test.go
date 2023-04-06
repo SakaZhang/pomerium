@@ -20,8 +20,8 @@ import (
 	"github.com/pomerium/pomerium/authorize/internal/store"
 	"github.com/pomerium/pomerium/config"
 	"github.com/pomerium/pomerium/internal/atomicutil"
-	"github.com/pomerium/pomerium/internal/handlers"
 	"github.com/pomerium/pomerium/internal/testutil"
+	hpke_handlers "github.com/pomerium/pomerium/pkg/hpke/handlers"
 	"github.com/pomerium/pomerium/pkg/policy/criteria"
 )
 
@@ -30,13 +30,10 @@ func TestAuthorize_handleResult(t *testing.T) {
 	opt.DataBrokerURLString = "https://databroker.example.com"
 	opt.SharedKey = "E8wWIMnihUx+AUfRegAQDNs8eRb3UrB5G3zlJW9XJDM="
 
-	htpkePrivateKey, err := opt.GetHPKEPrivateKey()
+	hpkePrivateKey, err := opt.GetHPKEPrivateKey()
 	require.NoError(t, err)
 
-	signingKey, err := opt.GetSigningKey()
-	require.NoError(t, err)
-
-	authnSrv := httptest.NewServer(handlers.JWKSHandler(signingKey, htpkePrivateKey.PublicKey()))
+	authnSrv := httptest.NewServer(hpke_handlers.HPKEPublicKeyHandler(hpkePrivateKey.PublicKey()))
 	t.Cleanup(authnSrv.Close)
 	opt.AuthenticateURLString = authnSrv.URL
 
@@ -61,6 +58,36 @@ func TestAuthorize_handleResult(t *testing.T) {
 			})
 		assert.NoError(t, err)
 		assert.Equal(t, 302, int(res.GetDeniedResponse().GetStatus().GetCode()))
+	})
+	t.Run("device-unauthenticated", func(t *testing.T) {
+		res, err := a.handleResult(context.Background(),
+			&envoy_service_auth_v3.CheckRequest{},
+			&evaluator.Request{},
+			&evaluator.Result{
+				Allow: evaluator.NewRuleResult(false, criteria.ReasonDeviceUnauthenticated),
+			})
+		assert.NoError(t, err)
+		assert.Equal(t, 302, int(res.GetDeniedResponse().GetStatus().GetCode()))
+
+		t.Run("webauthn path", func(t *testing.T) {
+			res, err := a.handleResult(context.Background(),
+				&envoy_service_auth_v3.CheckRequest{
+					Attributes: &envoy_service_auth_v3.AttributeContext{
+						Request: &envoy_service_auth_v3.AttributeContext_Request{
+							Http: &envoy_service_auth_v3.AttributeContext_HttpRequest{
+								Path: "/.pomerium/webauthn",
+							},
+						},
+					},
+				},
+				&evaluator.Request{},
+				&evaluator.Result{
+					Allow: evaluator.NewRuleResult(true, criteria.ReasonPomeriumRoute),
+					Deny:  evaluator.NewRuleResult(false, criteria.ReasonDeviceUnauthenticated),
+				})
+			assert.NoError(t, err)
+			assert.NotNil(t, res.GetOkResponse())
+		})
 	})
 }
 
@@ -198,13 +225,10 @@ func TestRequireLogin(t *testing.T) {
 	opt.SharedKey = "E8wWIMnihUx+AUfRegAQDNs8eRb3UrB5G3zlJW9XJDM="
 	opt.SigningKey = "LS0tLS1CRUdJTiBFQyBQUklWQVRFIEtFWS0tLS0tCk1IY0NBUUVFSUJlMFRxbXJkSXBZWE03c3pSRERWYndXOS83RWJHVWhTdFFJalhsVHNXM1BvQW9HQ0NxR1NNNDkKQXdFSG9VUURRZ0FFb0xaRDI2bEdYREhRQmhhZkdlbEVmRDdlNmYzaURjWVJPVjdUbFlIdHF1Y1BFL2hId2dmYQpNY3FBUEZsRmpueUpySXJhYTFlQ2xZRTJ6UktTQk5kNXBRPT0KLS0tLS1FTkQgRUMgUFJJVkFURSBLRVktLS0tLQo="
 
-	htpkePrivateKey, err := opt.GetHPKEPrivateKey()
+	hpkePrivateKey, err := opt.GetHPKEPrivateKey()
 	require.NoError(t, err)
 
-	signingKey, err := opt.GetSigningKey()
-	require.NoError(t, err)
-
-	authnSrv := httptest.NewServer(handlers.JWKSHandler(signingKey, htpkePrivateKey.PublicKey()))
+	authnSrv := httptest.NewServer(hpke_handlers.HPKEPublicKeyHandler(hpkePrivateKey.PublicKey()))
 	t.Cleanup(authnSrv.Close)
 	opt.AuthenticateURLString = authnSrv.URL
 

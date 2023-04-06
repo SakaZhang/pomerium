@@ -18,7 +18,6 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"github.com/pomerium/pomerium/authorize/evaluator"
-	"github.com/pomerium/pomerium/internal/handlers"
 	"github.com/pomerium/pomerium/internal/httputil"
 	"github.com/pomerium/pomerium/internal/log"
 	"github.com/pomerium/pomerium/internal/telemetry/requestid"
@@ -201,7 +200,7 @@ func (a *Authorize) requireLoginResponse(
 	checkRequestURL := getCheckRequestURL(in)
 	checkRequestURL.Scheme = "https"
 
-	redirectTo, err := handlers.BuildSignInURL(
+	redirectTo, err := urlutil.SignInURL(
 		state.hpkePrivateKey,
 		authenticateHPKEPublicKey,
 		authenticateURL,
@@ -226,13 +225,19 @@ func (a *Authorize) requireWebAuthnResponse(
 	opts := a.currentOptions.Load()
 	state := a.state.Load()
 
-	if !a.shouldRedirect(in) {
-		return a.deniedResponse(ctx, in, http.StatusUnauthorized, http.StatusText(http.StatusUnauthorized), nil)
-	}
-
 	// always assume https scheme
 	checkRequestURL := getCheckRequestURL(in)
 	checkRequestURL.Scheme = "https"
+
+	// If we're already on a webauthn route, return OK.
+	// https://github.com/pomerium/pomerium-console/issues/3210
+	if checkRequestURL.Path == urlutil.WebAuthnURLPath || checkRequestURL.Path == urlutil.DeviceEnrolledPath {
+		return a.okResponse(result.Headers), nil
+	}
+
+	if !a.shouldRedirect(in) {
+		return a.deniedResponse(ctx, in, http.StatusUnauthorized, http.StatusText(http.StatusUnauthorized), nil)
+	}
 
 	q := url.Values{}
 	if deviceType, ok := result.Allow.AdditionalData["device_type"].(string); ok {
